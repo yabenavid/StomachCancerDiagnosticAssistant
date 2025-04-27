@@ -1,66 +1,94 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy as sp
-from skimage import data, filters, segmentation as skimage_segmentation
+from skimage import data, filters, segmentation as skimage_segmentation, color
 from PIL import Image, ImageTk
-
 
 def segment(images):
     for img_path in images:
+        # Cargar la imagen
         imgn = Image.open(img_path)
+        
+        # Convertir a RGB si tiene canal alfa (RGBA)
+        if imgn.mode == 'RGBA':
+            imgn = imgn.convert('RGB')
+            
         img = np.array(imgn)
-
-        # print('Type: ', type(images))
-        # print('dtype: ', images.dtype)
-        # print('shape:', images.shape)
-
+        
+        # Convertir a escala de grises si es una imagen a color
+        if len(img.shape) == 3:
+            img_gray = color.rgb2gray(img)
+        else:
+            img_gray = img / 255.0 if img.max() > 1 else img
+            
         # Mostrar imagen inicial
-        plt.title("Imagen Inicial Escala de Grises")
-        plt.imshow(img, cmap="gray")
-        plt.axis("off")  # Opcional: Oculta los ejes
-        plt.show()
-
-        # Crear marcadores
-        markers = np.zeros_like(img)
-        markers[img < 30] = 1
-        markers[img > 150] = 2
-
-        # Calcular el mapa de elevación
-        elevation_map = filters.sobel(img)
-
-        # Mostrar mapa de elevación
-        plt.title("Mapa de Elevación (Sobel)")
-        plt.imshow(elevation_map, cmap="gray")
+        plt.figure(figsize=(8, 6))
+        plt.title("Imagen Histológica Original")
+        plt.imshow(img)
         plt.axis("off")
         plt.show()
-
+        
+        # Preprocesamiento - mejora de contraste
+        p2, p98 = np.percentile(img_gray, (2, 98))
+        img_rescale = np.clip((img_gray - p2) / (p98 - p2), 0, 1)
+        
+        # Mostrar imagen preprocesada
+        plt.figure(figsize=(8, 6))
+        plt.title("Imagen Preprocesada")
+        plt.imshow(img_rescale, cmap="gray")
+        plt.axis("off")
+        plt.show()
+        
+        # Crear marcadores adaptados a histología
+        # Ajustar estos umbrales según la imagen específica
+        markers = np.zeros_like(img_gray, dtype=np.uint8)
+        
+        # Marcar estructuras oscuras (núcleos, estructuras epiteliales)
+        markers[img_gray < 0.4] = 1
+        
+        # Marcar estructuras claras (fondo, espacios vacíos)
+        markers[img_gray > 0.8] = 2
+        
+        # Marcar tejido conectivo (valores intermedios)
+        mask_conectivo = (img_gray >= 0.5) & (img_gray <= 0.7)
+        markers[mask_conectivo] = 3
+        
         # Mostrar marcadores
-        plt.title("Marcadores")
-        plt.imshow(markers, cmap="viridis")
+        plt.figure(figsize=(8, 6))
+        plt.title("Marcadores para Tejidos")
+        plt.imshow(markers, cmap="nipy_spectral")
+        plt.colorbar(label='Tipo de Tejido')
         plt.axis("off")
         plt.show()
-
-        # Realizar la segmentación
-        segmentation = skimage_segmentation.watershed(elevation_map, markers)
-
+        
+        # Calcular el mapa de elevación con un filtro más adecuado para tejidos
+        elevation_map = filters.scharr(img_gray)
+        
+        # Mostrar mapa de elevación
+        plt.figure(figsize=(8, 6))
+        plt.title("Mapa de Bordes (Filtro Scharr)")
+        plt.imshow(elevation_map, cmap="magma")
+        plt.axis("off")
+        plt.show()
+        
+        # Realizar la segmentación watershed
+        segmentation = skimage_segmentation.watershed(elevation_map, markers, watershed_line=True)
+        
         # Mostrar segmentación obtenida
-        plt.title("Segmentación")
-        plt.imshow(segmentation, cmap="gray")
+        plt.figure(figsize=(8, 6))
+        plt.title("Segmentación de Tejidos")
+        plt.imshow(segmentation, cmap="nipy_spectral")
+        plt.colorbar(label='Regiones')
         plt.axis("off")
         plt.show()
-
-        # Llenar agujeros en la segmentación
-        segmentation = sp.ndimage.binary_fill_holes(segmentation - 1)
-        labeled_images, _ = sp.ndimage.label(segmentation)
-
-        # Mostrar la imagen segmentada superpuesta sobre la imagen original
-        plt.figure(figsize=(10, 5))
-        plt.imshow(img, cmap="gray")  # Imagen original
-        plt.title("Resultado: Imagen Inicial con Segmentación")
+        
+        # Superponer resultado sobre la imagen original
+        plt.figure(figsize=(10, 8))
+        plt.title("Resultado: Imagen Original con Segmentación")
+        plt.imshow(img)
+        plt.imshow(segmentation, alpha=0.5, cmap="nipy_spectral")
         plt.axis("off")
-
-        # Usar contours para superponer las etiquetas
-        plt.imshow(
-            labeled_images, alpha=0.5, cmap="nipy_spectral"
-        )  # Superponer con transparencia
         plt.show()
+        
+        # Para compatibilidad con el código original - regresar segmentación
+        return segmentation
